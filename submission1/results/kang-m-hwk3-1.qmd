@@ -1,0 +1,348 @@
+---
+title: "Homework 3: Submission 1"
+author: "Mathew Kang"
+execute:
+  echo: false
+  warning: false
+format: 
+  pdf:
+    mainfont: "Arial"
+    geometry:
+      - margin=1in
+---
+
+```{r}
+
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load(tidyverse, ggplot2, dplyr, lubridate, stringr, readxl, data.table, gdata, scales, kableExtra, knitr, broom, here)
+
+# Load dataset
+final_ma <- read_csv(here::here("data", "output", "final_data.csv"))
+
+```
+
+# Question 1
+
+```{r}
+# Create summary table ----------------------------------------------------
+q1_summary <- final_ma %>%
+  group_by(year) %>%
+  summarize(
+    `Avg. Star Rating` = mean(as.numeric(Star_Rating), na.rm = TRUE),
+    `Avg. Enrollment` = mean(as.numeric(avg_enrollment), na.rm = TRUE),
+    `Avg. Market Share` = mean(as.numeric(avg_enrollment) / as.numeric(avg_enrolled), na.rm = TRUE),
+    `Total Plans` = n_distinct(contractid, planid)
+  ) %>%
+  ungroup()
+
+
+# Visualize table ---------------------------------------------------------
+knitr::kable(q1_summary, 
+             digits = 2, 
+             caption = "Medicare Advantage Market Summary (2010-2015)",
+             col.names = c("Year", "Mean Star Rating", "Mean Enrollment", "Mean Market Share", "Plan Count")) %>%
+  kable_styling(latex_options = c("striped", "hold_position"))
+```
+
+# Question 2
+
+```{r}
+# Filter star ratings and create summary table ----------------------------------------------------
+q2_nostar <- final_ma %>%
+  filter(is.na(Star_Rating)) %>%
+  group_by(year) %>%
+  summarize(
+    `Avg. Enrollment` = mean(as.numeric(avg_enrollment), na.rm = TRUE),
+    `Avg. Market Share` = mean(as.numeric(avg_enrollment) / as.numeric(avg_enrolled), na.rm = TRUE),
+    `Total Plans` = n_distinct(contractid, planid)
+  ) %>%
+  ungroup()
+
+
+# Visualize table ---------------------------------------------------------
+knitr::kable(q2_nostar, 
+             digits = 2, 
+             caption = "Medicare Advantage Market Summary Without Star Ratings (2010-2015)",
+             col.names = c("Year", "Mean Enrollment", "Mean Market Share", "Plan Count")) %>%
+  kable_styling(latex_options = c("striped", "hold_position"))
+```
+
+# Question 3
+
+```{r}
+# Filter for years 2010, 2012, and 2015 -----------------------------------
+star_dist <- final_ma %>%
+  filter(year %in% c(2010, 2012, 2015)) %>%
+  filter(!is.na(Star_Rating)) %>%
+  mutate(Star_Rating = as.factor(Star_Rating))
+
+
+# Create bar graph --------------------------------------------------------
+ggplot(star_dist, aes(x = Star_Rating)) +
+  geom_bar(fill = "darkblue", color = "white") +
+  facet_wrap(~year, ncol = 3) +
+  labs(title = "Distribution of Medicare Advantage Star Ratings",
+       x = "Star Rating",
+       y = "Count of Plans") +
+  theme_minimal()
+```
+
+# Question 4
+
+```{r}
+final_ma <- final_ma %>%
+  mutate(
+    market_share = as.numeric(avg_enrollment) / as.numeric(avg_eligibles),
+    star_3 = if_else(as.numeric(Star_Rating) == 3, 1, 0),
+    star_3.5 = if_else(as.numeric(Star_Rating) == 3.5, 1, 0),
+    star_4 = if_else(as.numeric(Star_Rating) == 4, 1, 0),
+    star_4.5_plus = if_else(as.numeric(Star_Rating) >= 4.5, 1, 0)
+  )
+
+q4_regression <- map_dfr(2010:2015, function(y) {
+  model <- lm(market_share ~ star_3 + star_3.5 + star_4 + star_4.5_plus,
+              data = filter(final_ma, year == y))
+  tidy(model) %>%
+    mutate(year = y)
+}) %>%
+  select(Rating = term, estimate, year) %>%
+  pivot_wider(names_from = year, values_from = estimate)
+
+q4_regression <- q4_regression %>%
+  mutate(Rating = case_when(
+    Rating == "(Intercept)" ~ "Excluded (≤ 2.5 Stars)",
+    Rating == "star_3" ~ "3 Stars",
+    Rating == "star_3.5" ~ "3.5 Stars",
+    Rating == "star_4" ~ "4 Stars",
+    Rating == "star_4.5_plus" ~ "≥ 4.5 Stars"
+  ))
+
+knitr::kable(q4_regression, 
+             digits = 4) %>%
+  kable_styling(latex_options = c("striped", "hold_position"))
+```
+
+# Question 5
+
+```{r}
+
+quality <- c(
+  "breastcancer_screen",
+  "rectalcancer_screen",
+  "cv_diab_cholscreen",
+  "glaucoma_test",
+  "monitoring",
+  "flu_vaccine",
+  "pn_vaccine",
+  "physical_health",
+  "mental_health",
+  "osteo_test",
+  "physical_monitor",
+  "primaryaccess",
+  "osteo_manage",
+  "diab_healthy",
+  "bloodpressure",
+  "ra_manage",
+  "copd_test",
+  "bladder",
+  "falling",
+  "nodelays",
+  "doctor_communicate",
+  "carequickly",
+  "customer_service",
+  "overallrating_care",
+  "overallrating_plan",
+  "complaints_plan",
+  "appeals_timely",
+  "appeals_review",
+  "leave_plan",
+  "audit_problems",
+  "hold_times",
+  "info_accuracy",
+  "ttyt_available"
+)
+
+rdup_2010 <- final_ma %>%
+  filter(year == 2010) %>%
+  rowwise() %>%
+  mutate(
+    raw_score = mean(c_across(all_of(quality)), na.rm = TRUE)
+  ) %>%
+  ungroup() %>%
+  mutate(
+    rounded_rating = case_when(
+      raw_score >= 2.75 & partc_score == 3.0 ~ "3.0 Stars",
+      raw_score >= 3.25 & partc_score == 3.5 ~ "3.5 Stars",
+      raw_score >= 3.75 & partc_score == 4.0 ~ "4.0 Stars",
+      raw_score >= 4.25 & partc_score == 4.5 ~ "4.5 Stars",
+      raw_score >= 4.75 & partc_score == 5.0 ~ "5.0 Stars",
+      TRUE ~ NA_character_
+    )
+  ) %>% 
+  filter(!is.na(rounded_rating)) %>%
+  count(rounded_rating) %>%
+  rename(`Star Rating` = rounded_rating, `Count` = n)
+
+knitr::kable(rdup_2010,
+             caption = "Plans Rounded Up Into Higher Star Ratings (2010)") %>%
+    kable_styling(latex_options = c("striped", "hold_position"))
+```
+
+# Question 6
+
+```{r}
+rd1_2010 <- final_ma %>%
+  filter(year == 2010) %>%
+  rowwise() %>%
+  mutate(
+    raw_score = mean(c_across(all_of(quality)), na.rm = TRUE),
+    market_share = as.numeric(avg_enrollment) / as.numeric(avg_enrolled)
+  ) %>%
+  ungroup() %>%
+  filter(!is.na(raw_score), Star_Rating %in% c(2.5, 3)) %>%
+  mutate(
+    score = raw_score - 2.75,         
+    treated = (score >= 0),              
+    bandwidth = (score >= -0.125 & score <= 0.125), 
+    score_treated = score * treated
+  )
+
+rd2_2010 <- final_ma %>%
+  filter(year == 2010) %>%
+  rowwise() %>%
+  mutate(
+    raw_score = mean(c_across(all_of(quality)), na.rm = TRUE),
+    market_share = as.numeric(avg_enrollment) / as.numeric(avg_enrolled)
+  ) %>%
+  ungroup() %>%
+  filter(!is.na(raw_score), Star_Rating %in% c(3, 3.5)) %>%
+  mutate(
+    score = raw_score - 3.25,         
+    treated = (score >= 0),              
+    bandwidth = (score >= -0.125 & score <= 0.125), 
+    score_treated = score * treated
+  )
+
+reg1 <- lm(market_share ~ score + treated + score_treated, 
+               data = (rd1_2010 %>% filter(bandwidth == TRUE)))
+
+reg2 <- lm(market_share ~ score + treated + score_treated, 
+               data = (rd2_2010 %>% filter(bandwidth == TRUE)))
+
+est1 <- as.numeric(reg1$coefficients["treatedTRUE"])
+est2 <- as.numeric(reg2$coefficients["treatedTRUE"])
+
+p1 <- summary(reg1)$coefficients["treatedTRUE", 4]
+p2 <- summary(reg2)$coefficients["treatedTRUE", 4]
+
+rd_comparison <- data.frame(
+  Comparison = c("2.5 vs 3.0 Stars", "3.0 vs 3.5 Stars"),
+  Cutoff = c(2.75, 3.25),
+  ATE = c(est1, est2),
+  PValue = c(p1, p2)
+)
+
+knitr::kable(rd_comparison, 
+             digits = 5, 
+             col.names = c("Comparison", "Cutoff", "RD Estimate (ATE)", "P-Value"),
+             caption = "Table 5: RDD Estimates of Star Rating Impact (Bandwidth = 0.125)")
+```
+
+# Question 7
+
+```{r}
+bandwidths <- c(0.1, 0.12, 0.13, 0.14, 0.15)
+sensitivity_results <- data.frame()
+
+for (h in bandwidths) {
+  
+  reg1 <- lm(market_share ~ score + treated + score_treated, 
+             data = (rd1_2010 %>% filter(abs(score) <= h)))
+
+  reg2 <- lm(market_share ~ score + treated + score_treated, 
+             data = (rd2_2010 %>% filter(abs(score) <= h)))
+
+  sensitivity_results <- rbind(sensitivity_results, 
+    data.frame(Bandwidth = h, Estimate = coef(reg1)["treatedTRUE"], Comparison = "2.5 vs 3.0 Stars"),
+    data.frame(Bandwidth = h, Estimate = coef(reg2)["treatedTRUE"], Comparison = "3.0 vs 3.5 Stars")
+  )
+}
+
+ggplot(sensitivity_results, aes(x = Bandwidth, y = Estimate, color = Comparison, group = Comparison)) +
+  geom_line(size = 1) +
+  geom_point(size = 3) +
+  theme_minimal() +
+  labs(title = "Sensitivity of RD Estimates to Bandwidth",
+       y = "RD Estimate (ATE)",
+       x = "Bandwidth (h)") +
+  scale_color_manual(values = c("darkblue", "darkorange"))
+```
+# Question 8
+
+```{r}
+library(ggplot2)
+
+density_plot <- function(df, cutoff, title_text) {
+  df <- df %>% 
+    mutate(side = ifelse(raw_score < cutoff, "Left", "Right"))
+  
+  ggplot(df, aes(x = raw_score, fill = side, color = side)) +
+    geom_density(alpha = 0.3, size = 1) +
+    geom_vline(xintercept = cutoff, linetype = "dashed", color = "red", size = 1.2) +
+    geom_rug(alpha = 0.1) +
+    theme_minimal() +
+    labs(
+      title = title_text,
+      x = "Raw Quality Score",
+      y = "Market Share",
+      fill = "Side of Cutoff",
+      color = "Side of Cutoff"
+    ) +
+    coord_cartesian(xlim = c(cutoff - 0.25, cutoff + 0.25)) +
+    theme(legend.position = "none")
+}
+
+plot_275 <- density_plot(rd1_2010, 2.75, "2.5 vs 3.0 Stars")
+plot_325 <- density_plot(rd2_2010, 3.25, "3.0 vs 3.5 Stars")
+
+print(plot_275)
+print(plot_325)
+```
+# Question 9
+```{r}
+hmo_types <- c("HMO", "HMOPOS")
+
+rd1_2010 <- rd1_2010 %>%
+  mutate(
+    is_hmo = if_else(plan_type %in% hmo_types, 1, 0),
+    is_partd = if_else(partd == "Yes", 1, 0)
+  )
+
+rd2_2010 <- rd2_2010 %>%
+    mutate(
+    is_hmo = if_else(plan_type %in% hmo_types, 1, 0),
+    is_partd = if_else(partd == "Yes", 1, 0)
+  )
+
+hmo_1 <- lm(is_hmo ~ score + treated + score_treated, 
+                data = (rd1_2010 %>% filter(bandwidth == TRUE)))
+
+hmo_2 <- lm(is_hmo ~ score + treated + score_treated, 
+                data = (rd2_2010 %>% filter(bandwidth == TRUE)))
+
+hmo_jump_1 <- coef(hmo_1)["treatedTRUE"]
+hmo_p_1 <- summary(hmo_1)$coefficients["treatedTRUE", 4]
+
+hmo_jump_2 <- coef(hmo_2)["treatedTRUE"]
+hmo_p_2 <- summary(hmo_2)$coefficients["treatedTRUE", 4]
+
+balance_table <- data.frame(
+  Comparison = c("2.5 vs 3.0 Stars", "3.0 vs 3.5 Stars"),
+  `HMO Difference` = c(hmo_jump_1, hmo_jump_2),
+  `P-Value` = c(hmo_p_1, hmo_p_2)
+)
+
+knitr::kable(balance_table, digits = 5, caption = "Table 6: Plan Characteristics")
+```
+# Question 10
+While question 9 returned an error, the other findings suggest that increased star ratings are associated with more enrollments, with plans exceeding the 2.75 star threshold experiencing, on average, about a 5% statistically significant increase in enrollments. Interestingly, plans that exceed the 3.25 star cutoff actually experienced, on average, about a 4% decrease in enrollments. This could suggest that plans at the 3.5-star level encounter different competitive pressures that outweigh the benefits of a marginal increase in ratings. While more information from question 9 is needed, enrollment changes may be driven by the star ratings themselves and not necessarily quality measures, given the sheer number of them that makes star ratings a simpler guide to decision-making for enrolling. 
