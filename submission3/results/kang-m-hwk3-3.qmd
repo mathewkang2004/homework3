@@ -1,0 +1,448 @@
+---
+title: "Homework 3: Submission 3"
+author: "Mathew Kang"
+execute:
+  echo: false
+  warning: false
+  message: false
+format: 
+  pdf:
+    mainfont: "Arial"
+    geometry:
+      - margin=1in
+---
+
+```{r}
+
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load(tidyverse, ggplot2, dplyr, lubridate, stringr, readxl, data.table, gdata, scales, kableExtra, knitr, broom, here, rdrobust, rddensity)
+
+# Load dataset
+final_ma <- read_csv(here::here("data", "output", "final_data.csv")) %>%
+  mutate(market_share = avg_enrollment / avg_enrolled)
+
+```
+
+# Question 1
+
+```{r}
+#| label: q1-data
+#| tbl-cap: "Medicare Advantage Market Summary (2010-2015)"
+
+# Create summary table ----
+q1_summary <- final_ma %>%
+  filter(!is.na(Star_Rating)) %>%
+  group_by(year) %>%
+  summarize(
+    `Avg. Star Rating` = mean(Star_Rating, na.rm = TRUE),
+    `Avg. Enrollment` = mean(as.numeric(avg_enrollment), na.rm = TRUE),
+    `Avg. Market Share` = mean(market_share, na.rm = TRUE),
+    `Total Plans` = n()
+  ) %>%
+  ungroup()
+
+
+# Visualize table ----
+knitr::kable(q1_summary, 
+             digits = 2, 
+             col.names = c("Year", "Mean Star Rating", "Mean Enrollment", "Mean Market Share", "Plan Count")) %>%
+  kable_styling(latex_options = c("striped", "hold_position"))
+```
+
+# Question 2
+
+```{r}
+#| label: q2-data
+#| tbl-cap: "Medicare Advantage Market Summary Without Star Ratings (2010-2015)"
+
+# Filter star ratings and create summary table ----
+q2_nostar <- final_ma %>%
+  filter(is.na(Star_Rating)) %>%
+  group_by(year) %>%
+  summarize(
+    `Avg. Enrollment` = mean(as.numeric(avg_enrollment), na.rm = TRUE),
+    `Avg. Market Share` = mean(market_share, na.rm = TRUE),
+    `Total Plans` = n()
+  ) %>%
+  ungroup()
+
+
+# Visualize table ---------------------------------------------------------
+knitr::kable(q2_nostar, 
+             digits = 2,
+             col.names = c("Year", "Mean Enrollment", "Mean Market Share", "Plan Count")) %>%
+  kable_styling(latex_options = c("striped", "hold_position"))
+```
+
+# Question 3
+
+```{r}
+#| label: q3-data
+
+# Filter for years 2010, 2012, and 2015
+star_dist <- final_ma %>%
+  filter(year %in% c(2010, 2012, 2015)) %>%
+  filter(!is.na(Star_Rating)) %>%
+  mutate(Star_Rating = as.factor(Star_Rating))
+
+
+# Create bar graph
+ggplot(star_dist, aes(x = Star_Rating)) +
+  geom_bar(fill = "darkblue", color = "white") +
+  facet_wrap(~year, ncol = 3) +
+  labs(title = "Distribution of Medicare Advantage Star Ratings (2010-2015)",
+       x = "Star Rating",
+       y = "Count of Plans") +
+  theme_minimal()
+```
+
+The distribution has changed over time such that the star ratings of plans increased over time. More specifically, while the Medicare Advantage market was dominated by 2.5-star plans in 2010, most plans have achieved 4.0 or 4.5 stars by 2015. This may suggest either an improvement in plans or greater flexibility in the rating system.
+
+# Question 4
+
+```{r}
+#| label: q4-data
+#| tbl-cap: "OLS Regression of Market Share on Star Ratings"
+
+run_ols_year <- function(yr, data) {
+  
+  year_data <- data %>%
+    filter(year == yr) %>%
+    mutate(
+      star_cat = case_when(
+        Star_Rating <= 2.5 ~ "2.5 or below",
+        Star_Rating == 3.0 ~ "3.0",
+        Star_Rating == 3.5 ~ "3.5",
+        Star_Rating == 4.0 ~ "4.0",
+        Star_Rating >= 4.5 ~ "4.5 or above"
+      ),
+      star_cat = relevel(as.factor(star_cat), ref = "2.5 or below")
+    ) %>%
+    filter(!is.na(market_share), !is.na(star_cat))
+  
+
+  model <- lm(market_share ~ star_cat, data = year_data)
+  
+
+  tidy(model) %>%
+    select(term, estimate) %>%
+    rename(!!as.character(yr) := estimate)
+}
+
+
+years <- 2010:2015
+ols_results <- map(years, ~run_ols_year(.x, final_ma)) %>%
+  reduce(full_join, by = "term")
+
+q4_table <- ols_results %>%
+  rename(`Star Rating Category` = term) %>%
+  mutate(`Star Rating Category` = case_when(
+    `Star Rating Category` == "(Intercept)" ~ "2.5 Stars or Below (Excluded)",
+    `Star Rating Category` == "star_cat3.0" ~ "3.0 Stars",
+    `Star Rating Category` == "star_cat3.5" ~ "3.5 Stars",
+    `Star Rating Category` == "star_cat4.0" ~ "4.0 Stars",
+    `Star Rating Category` == "star_cat4.5 or above" ~ "4.5 Stars or Above",
+    TRUE ~ `Star Rating Category`
+  ))
+
+knitr::kable(q4_table, digits = 4) %>%
+    kable_styling(latex_options = c("striped", "hold_position"))
+```
+
+\newpage
+
+```{r}
+data_2010 <- read_csv(here::here("data", "output", "data-2010.csv")) %>%
+  mutate(market_share = avg_enrollment / avg_enrolled)
+
+final_2010 <- data_2010 %>%
+  mutate(
+    raw_rating = rowMeans(
+      cbind(
+        breastcancer_screen, 
+        rectalcancer_screen, 
+        cv_diab_cholscreen,
+        glaucoma_test,
+        monitoring,
+        flu_vaccine,
+        pn_vaccine,
+        physical_health,
+        mental_health,
+        osteo_test,
+        physical_monitor,
+        primaryaccess,
+        osteo_manage,
+        diab_healthy,
+        bloodpressure,
+        ra_manage,
+        copd_test,
+        bladder,
+        falling,
+        nodelays,
+        doctor_communicate,                   
+        carequickly,
+        customer_service,                   
+        overallrating_care,
+        overallrating_plan,
+        complaints_plan,
+        appeals_timely,
+        appeals_review,
+        leave_plan,
+        audit_problems,
+        hold_times,
+        info_accuracy,
+        ttyt_available
+      ),
+      na.rm = TRUE
+    )
+  ) %>%
+  select(contractid, planid, fips, plan_type, partd, avg_enrollment, avg_eligibles, avg_enrolled, ma_rate, partc_score, partcd_score, Star_Rating, raw_rating, market_share)
+```
+
+# Question 5
+
+```{r}
+#| label: q5-data
+#| tbl-cap: "MA Plan Counts After Rounding Star Ratings (2010)"
+
+# Define cutoffs
+thresholds <- tibble(
+  lower = c(2.5, 3.0, 3.5, 4.0, 4.5),
+  upper = c(3.0, 3.5, 4.0, 4.5, 5.0),
+  cutoff     = c(2.75, 3.25, 3.75, 4.25, 4.75)
+)
+
+q5_round <- thresholds %>%
+  pmap_dfr(function(lower, upper, cutoff) {
+    final_2010 %>%
+      filter(
+        !is.na(raw_rating),
+        Star_Rating == upper,
+        raw_rating >= cutoff
+      ) %>%
+      summarize(
+        `Star Rating` = as.character(upper),
+        `Threshold` = as.character(cutoff),
+        `Plans Rounded Up` = n()
+      )
+  })
+
+knitr::kable(q5_round) %>%
+    kable_styling(latex_options = c("striped", "hold_position"))
+```
+
+# Question 6
+
+```{r}
+#| label: q6-data
+#| tbl-cap: "RD Estimates of Star Ratings on Enrollments (h = 0.125)"
+
+ma.rd275 <- final_2010 %>%
+  filter(!is.na(raw_rating), !is.na(partc_score), Star_Rating == 2.5 | Star_Rating == 3) %>%
+  mutate(score = raw_rating - 2.75,
+         treat = (score>=0),
+         bandwidth = (abs(score) <= 0.125),
+         score_treat = score * treat)
+
+est225 <- rdrobust(y = ma.rd275$market_share, x = ma.rd275$score, c = 0, h = 0.125, p = 1, kernel = "uniform", vce = "hc0", masspoints = "off")
+
+ci_275 <- paste0("[", round(est225$ci[1,1], 5), ", ", round(est225$ci[1,2], 5), "]")
+
+n_275 <- est225$N[1] + est225$N[2]
+
+ma.rd325 <- final_2010 %>%
+  filter(!is.na(raw_rating), !is.na(partc_score), Star_Rating == 3 | Star_Rating == 3.5) %>%
+  mutate(score = raw_rating - 3.25,
+         treat = (score >= 0),
+         bandwidth = (abs(score) <= 0.125),
+         score_treat = score * treat)
+
+est325 <- rdrobust(y = ma.rd325$market_share, x = ma.rd325$score, c = 0, h = 0.125, p = 1, kernel = "uniform", vce = "hc0", masspoints = "off")
+
+ci_325 <- paste0("[", round(est325$ci[1,1], 5), ", ", round(est325$ci[1,2], 5), "]")
+
+n_325 <- est325$N[1] + est325$N[2]
+
+q6_data <- data.frame(
+  Comparison = c("2.5 vs 3.0 Stars", "3.0 vs. 3.5 Stars"),
+  Cutoff = c(2.75, 3.25),
+  Estimate = c(est225$Estimate[1], est325$Estimate[1]),
+  P_Value = c(est225$pv[1], est325$pv[1]),
+  Robust_CI = c(ci_275, ci_325),
+  N = c(n_275, n_325)
+)
+
+knitr::kable(q6_data, digits = 5, col.names = c("Comparison", "Star Cutoff", "RD Estimate (ATE)", "P-Value", "95% CI", "N"))
+```
+
+# Question 7
+
+```{r}
+#| label: q7-data
+
+ma.rd275 <- final_2010 %>%
+  filter(!is.na(raw_rating), !is.na(partc_score), Star_Rating == 2.5 | Star_Rating == 3) %>%
+  mutate(score = raw_rating - 2.75,
+         treat = (score>=0),
+         score_treat = score * treat)
+
+ma.rd325 <- final_2010 %>%
+  filter(!is.na(raw_rating), !is.na(partc_score), Star_Rating == 3 | Star_Rating == 3.5) %>%
+  mutate(score = raw_rating - 3.25,
+         treat = (score >= 0),
+         score_treat = score * treat)
+
+# Define bandwidths
+bandwidths <- c(0.1, 0.12, 0.13, 0.14, 0.15)
+
+# Create empty data frame
+sens_results <- data.frame()
+
+# Run for loop for both cutoffs
+
+for(h in bandwidths) {
+  fit_275 <- rdrobust(y = ma.rd275$market_share, x = ma.rd275$score, c = 0, h = h, p = 1, kernel = "uniform", vce = "hc0", masspoints = "off")
+  fit_325 <- rdrobust(y = ma.rd325$market_share, x = ma.rd325$score, c = 0, h = h, p = 1, kernel = "uniform", vce = "hc0", masspoints = "off")
+  temp_results <- data.frame(
+    Bandwidth = h,
+    Estimate = c(fit_275$Estimate[1], fit_325$Estimate[1]),
+    Comparison = c("2.5 vs 3.0 Stars", "3.0 vs 3.5 Stars")
+  )
+  
+  sens_results <- rbind(sens_results, temp_results)
+}
+
+# Graph results
+ggplot(sens_results, aes(x = Bandwidth, y = Estimate, color = Comparison, group = Comparison)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 3) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black", alpha = 0.5) +
+  theme_minimal() +
+  labs(
+    title = "Sensitivity of RD Estimates to Bandwidth Selection",
+    x = "Bandwidth (h)",
+    y = "Estimated Market Share Jump (ATE)",
+    color = "Bandwidth"
+  ) +
+  scale_color_manual(values = c("darkblue", "darkorange")) +
+  expand_limits(y = 0)
+```
+
+The estimates appear to be relatively stable as the bandwidth increases for both star rating comparisons. However, the ATE appears to increase sharply when the bandwidth increases from 0.14 to 0.15 for the 3.0-star versus 3.5-star comparison.
+
+# Question 8
+
+```{r}
+#| label: q8-data
+
+ma.rd275 <- final_2010 %>%
+  filter(!is.na(raw_rating), !is.na(partc_score), Star_Rating == 2.5 | Star_Rating == 3) %>%
+  mutate(score = raw_rating - 2.75,
+         treat = (score>=0),
+         score_treat = score * treat)
+
+ma.rd325 <- final_2010 %>%
+  filter(!is.na(raw_rating), !is.na(partc_score), Star_Rating == 3 | Star_Rating == 3.5) %>%
+  mutate(score = raw_rating - 3.25,
+         treat = (score >= 0),
+         score_treat = score * treat)
+
+dens1 <- rddensity(ma.rd275$score, c = 0)
+
+stats_275 <- data.frame(
+  `T-Statistic` = round(dens1$test$t_jk, 4),
+  `P-Value` = format.pval(dens1$test$p_jk, eps = 0.001),
+  `N-left` = dens1$N$left,
+  `N-right` = dens1$N$right
+)
+
+knitr::kable(stats_275, col.names = c("T-Statistic", "P-Value", "N (Left)", "N (Right)"),
+             caption = "McCrary Test results for 2.75-Star Threshold")
+
+densplot1 <- rdplotdensity(dens1, ma.rd275$score,
+                           title = "Density Continuity: 2.75-Star Threshold",
+                           xlabel = "Centered Raw Score (Raw - 2.75)",
+                           ylabel = "Density Estimate")
+```
+
+There is a massive spike in observations immediately to the left of the 2.75-star threshold, followed by a larger drop in density estimates to the right. The t-statistic is also about -74 with a p-value of 0, which strongly rejects the null hypothesis of continuity. This suggests overwhelming evidence of manipulation and that plans around the threshold are unlikely to be sorted randomly.
+
+\newpage
+
+```{r}
+dens2 <- rddensity(ma.rd325$score, c = 0)
+
+stats_325 <- data.frame(
+  `T-Statistic` = round(dens2$test$t_jk, 4),
+  `P-Value` = format.pval(dens2$test$p_jk, eps = 0.001),
+  `N-left` = dens2$N$left,
+  `N-right` = dens2$N$right
+)
+
+knitr::kable(stats_325, col.names = c("T-Statistic", "P-Value", "N (Left)", "N (Right)"),
+             caption = "McCrary Test results for 3.25-Star Threshold")
+
+densplot2 <- rdplotdensity(dens2, ma.rd325$score,
+                           title = "Density Continuity: 3.25-Star Threshold",
+                           xlabel = "Centered Raw Score (Raw - 3.25)",
+                           ylabel = "Density Estimate")
+```
+
+Likewise, the density estimates around the 3.25-star threshold fails the McCrary Density Test. While there is a noticeably smaller spike in observations to the left of the threshold, there is still an sharp drop immediately before the threshold. The t-statistic is also about 5.7 with a p-value of 0, which, again, strongly rejects the null hypothesis of continuity. Therefore, there is significant evidence of manipulation for both thresholds.
+
+# Question 9
+
+```{r}
+#| label: q9-data
+#| tbl-cap: "Balance Test Estimates and Sample Sizes"
+
+q9_2010 <- final_2010 %>%
+  mutate(
+    is_hmo = if_else(plan_type == "HMO/HMOPOS", 1, 0),
+    is_partd = if_else(partd == "Yes", 1, 0)
+  )
+
+ma.rd275 <- q9_2010 %>%
+  filter(!is.na(raw_rating), !is.na(partc_score), Star_Rating %in% c(2.5, 3.0)) %>%
+  mutate(score = raw_rating - 2.75)
+
+bal_hmo_275 <- rdrobust(y = ma.rd275$is_hmo, x = ma.rd275$score, c = 0, h = 0.125, p = 1, kernel = "uniform", vce = "hc0", masspoints = "off")
+bal_partd_275 <- rdrobust(y = ma.rd275$is_partd, x = ma.rd275$score, c = 0, h = 0.125, p = 1, kernel = "uniform", vce = "hc0", masspoints = "off")
+
+ma.rd325 <- q9_2010 %>%
+  filter(!is.na(raw_rating), !is.na(partc_score), Star_Rating %in% c(3.0, 3.5)) %>%
+  mutate(score = raw_rating - 3.25)
+
+bal_hmo_325 <- rdrobust(y = ma.rd325$is_hmo, x = ma.rd325$score, c = 0, h = 0.125, p = 1, kernel = "uniform", vce = "hc0", masspoints = "off")
+bal_partd_325 <- rdrobust(y = ma.rd325$is_partd, x = ma.rd325$score, c = 0, h = 0.125, p = 1, kernel = "uniform", vce = "hc0", masspoints = "off")
+
+balance_results <- data.frame(
+  Variable  = rep(c("HMO Status", "Part D Status"), 2),
+  Threshold = rep(c("2.75 Threshold", "3.25 Threshold"), each = 2),
+  Estimate  = c(bal_hmo_275$Estimate[1], bal_partd_275$Estimate[1], 
+                bal_hmo_325$Estimate[1], bal_partd_325$Estimate[1]),
+  Lower = c(bal_hmo_275$ci[1,1], bal_partd_275$ci[1,1], 
+            bal_hmo_325$ci[1,1], bal_partd_325$ci[1,1]),
+  Upper = c(bal_hmo_275$ci[1,2], bal_partd_275$ci[1,2], 
+            bal_hmo_325$ci[1,2], bal_partd_325$ci[1,2]),
+  N_left = c(bal_hmo_275$N[1], bal_partd_275$N[1], 
+                 bal_hmo_325$N[1], bal_partd_325$N[1]),
+  N_right = c(bal_hmo_275$N[2], bal_partd_275$N[2], 
+                  bal_hmo_325$N[2], bal_partd_325$N[2])
+)
+
+balance_results %>%
+  knitr::kable(digits = 3, col.names = c("Variable", "Threshold", "Estimate", "Lower", "Upper", "N (Left)", "N (Right)")) %>%
+  kableExtra::kable_styling(latex_options = c("striped", "hold_position"))
+
+ggplot(balance_results, aes(x = Estimate, y = Variable)) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "red") +
+  geom_pointrange(aes(xmin = Lower, xmax = Upper), color = "darkblue") +
+  facet_wrap(~Threshold) +
+  theme_minimal() +
+  labs(title = "Covariate Balance Tests",
+       x = "Mean Difference",
+       y = "")
+```
+# Question 10
+Initial findings suggest that increased star ratings are associated with more enrollments, with plans exceeding the 2.75 star threshold experiencing, on average, about a 5% statistically significant increase in enrollments. Interestingly, plans that exceed the 3.25 star cutoff actually experienced, on average, about a 4% decrease in enrollments according to Table 4. This could suggest that plans at the 3.5-star level encounter different competitive pressures that outweigh the benefits of a marginal increase in ratings. However, the McCrary Test and the lack of covariate balance complicate causal interpretations. Firstly, the McCrary Tests in Tables 6 and 7 indicate statistically significant evidence of manipulation, perhaps in reporting, so plans don't fall below the 3-star threshold. Secondly, there may be fundamental differences between 3-star plans (e.g., more HMOs) than those rated lower, as shown in question 9.
